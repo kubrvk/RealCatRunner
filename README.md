@@ -1,36 +1,37 @@
 # Real Cat Runner
+<img align="left" width="50%" src="https://github.com/kubrvk/RealCatRunner/blob/main/Content/RealCatRunner/images/catbanner.jpg"/>
+<h3> <a href="https://play.google.com/store/apps/details?id=com.Kubrick.RealCatRunner"><img src="https://img.shields.io/badge/Google_Play:-com.Kubrick.RealCatRunner-000000?style=flat-square&logo=google-play&logoColor=white&labelColor=000000" height="25"/> </a></h3>
 
-> **Endless runner — mobile** — Unreal Engine 5.7 · C++ · Android · Solo Development  
-> [ArtStation](https://www.artstation.com/kubrik)
-
----
-
-## Overview
-
-Real Cat Runner is an endless auto-runner built in Unreal Engine 5.7 using C++, targeting Android. The player controls a cat moving at continuously increasing speed through a procedurally generated track. The game loop is built on three pillars: responsive single-tap and swipe touch controls, a procedural level generation system that constructs the track ahead of the player in real-time, and a mobile optimization pipeline designed to maintain 60 fps on mid-range Android hardware while delivering high-quality visuals.
+![](https://img.shields.io/badge/Mobile-0c5299?style=) ![](https://img.shields.io/badge/Platformer-759651?style=) ![](https://img.shields.io/badge/Touch--Controls-635196?style=) ![Blueprint](https://img.shields.io/badge/Blueprint-00599C?style=logo=c%2B%2B&logoColor=white)  ![Blueprint](https://img.shields.io/badge/Unreal_Engine_5.7-0E1128?style=for-the-badges&logo=unrealengine&logoColor=white)  ![Blueprint](https://img.shields.io/badge/Status-Shipped-success?style=for-the-badges) 
+<br>
+An endless auto-runner targeting Android. Control a cat through a procedurally generated track at ever-increasing speed. Built on responsive tap/swipe controls, real-time procedural generation, and a mobile optimization pipeline targeting 60fps on mid-range hardware.
 
 The primary technical challenges were building a procedural chunk-based world that streams seamlessly at high velocities, implementing a touch input model that feels precise at increasing game speeds, and sustaining visual fidelity within aggressive mobile performance budgets. All gameplay systems, procedural generation, character controller, UI, and assets were developed by a single developer.
+<br clear="left"/>
+<p align="center">
+<img src="https://play-lh.googleusercontent.com/B27x_iAvinUCyKGBYyf5LtYsGcOQljUr6QMmDSTr0dUqz8uA-85uiog5_a0ewqCNjNQLvxXK435CdQmiYbzvJZc=w5120-h2880-rw" width="25%"/><img src="https://play-lh.googleusercontent.com/ymVE0MT-UvHPTSJgTrDo7i4AD3LaTvskVnMftjXqGbMRnpP_Qjp7JQaZrXmDdGLx8h2n5bc-3AIxGiwVZLPydQ=w2560-h1440-rw" width="25%"/><img src="https://play-lh.googleusercontent.com/70-K5h4mLOzhAaSiRZGKvFQplZtzXJbw25KjFQIv-GXNk2Boi-9HRrifJ8HZmercMh8j6wEKqZvJ3aa-dAOxUQk=w2560-h1440-rw" width="25%"/><img src="https://play-lh.googleusercontent.com/ART04ZE12TzpDkqGrabdj_l5Y6j65fGf1LCI_B4IMde-brk2PXNpnhbqPOvmV4aoLN7P_HiNbxoSChg8oEqf3Xk=w2560-h1440-rw" width="25%"/>
+</p>
 
 ---
 
-## Engine & Technical Stack
+## Technical Detail
 
 | Layer | Technology |
 |---|---|
 | Engine | Unreal Engine 5.7 |
-| Primary Language | C++ (gameplay, generation, systems) |
+| Primary Language | Blueprint (gameplay, generation, systems) |
 | Platform | Android (primary) |
 | Input | Custom touch input component |
-| Physics | Chaos — lane collision, obstacle interaction |
+| Physics | Chaos , lane collision, obstacle interaction |
 | Rendering | Mobile forward renderer, scalable quality tiers |
 | Procedural Gen | Chunk-based streaming, seeded spawn tables |
-| Animation | UE5 Animation Blueprint + `UAnimInstance` C++ subclass |
+| Animation | UE5 Animation Blueprint + `UAnimInstance` Blueprint subclass |
 | Build | Android SDK/NDK, Gradle, UE5 Android packaging |
-| 3D Pipeline | ZBrush → Maya → Substance Painter → UE5 |
+| 3D Pipeline | Blender, UE5 |
 
 ---
 
-## Architecture Overview
+## Core Overview
 
 ```
 RealCatRunner/
@@ -40,7 +41,7 @@ RealCatRunner/
 │   │   ├── RCRGameMode.h/.cpp                 # Session, speed scaling, score, game state
 │   │   └── RCRPlayerController.h/.cpp         # Touch input routing, HUD init
 │   ├── Systems/
-│   │   ├── TouchInputSystem/                   # Raw touch → lane/jump/slide intent
+│   │   ├── TouchInputSystem/                   # Raw touch , lane/jump/slide intent
 │   │   ├── LaneMovementSystem/                 # Auto-run, lane switching, speed ramp
 │   │   ├── ProceduralGenSystem/               # Chunk spawner, obstacle placement, pooling
 │   │   ├── ObstacleSystem/                     # Obstacle types, collision, difficulty scaling
@@ -61,17 +62,17 @@ RealCatRunner/
 
 ---
 
-## Core Systems: Technical Detail
+## Core Systems: 
 
 ### 1. Auto-Run & Lane Movement System
 
-The player character moves forward automatically at a speed controlled entirely by `URCRGameMode`. Lateral movement is constrained to discrete lanes — the player's only control axes are lane-switch (left/right), jump, and slide.
+The player character moves forward automatically at a speed controlled entirely by `URCRGameMode`. Lateral movement is constrained to discrete lanes , the player's only control axes are lane-switch (left/right), jump, and slide.
 
 **Forward Movement:**
-- `ULaneMovementSystem` drives the character forward each tick via direct position offset — not physics-based forward movement.
+- `ULaneMovementSystem` drives the character forward each tick via direct position offset , not physics-based forward movement.
 - `CurrentSpeed` is a replicated float on `ARCRGameMode`, incremented by the difficulty curve over session time.
 - Forward delta: `NewLocation = CurrentLocation + (ForwardVector * CurrentSpeed * DeltaTime)`.
-- Speed is applied to the character position, not via `UCharacterMovementComponent::MaxWalkSpeed` — this avoids CMC pathfinding overhead and gives precise control over the forward axis without physics interference.
+- Speed is applied to the character position, not via `UCharacterMovementComponent::MaxWalkSpeed` , this avoids CMC pathfinding overhead and gives precise control over the forward axis without physics interference.
 
 **Lane System:**
 - Track divided into `LaneCount` (default: 3) discrete lanes, each defined by a `float LaneOffset` from center.
@@ -115,7 +116,7 @@ void ULaneMovementSystem::TickLaneSwitch(float DeltaTime)
 **Slide:**
 - Capsule half-height reduced on slide start; restored on slide end.
 - Slide duration fixed; early exit available if swipe-up received before duration expires.
-- Slide plays dedicated animation blend — low-body pose with maintained forward motion.
+- Slide plays dedicated animation blend , low-body pose with maintained forward motion.
 
 ---
 
@@ -136,12 +137,12 @@ Single-finger swipe and tap gestures map to all player actions. The system is im
 **Swipe Detection Pipeline:**
 - `TouchBegin`: record `StartPosition`, `StartTime`.
 - `TouchEnd`: compute `Delta = EndPosition - StartPosition`, `Duration = EndTime - StartTime`.
-- If `Delta.Size() > SwipeMinDistance` and `Duration < SwipeMaxDuration`: classify dominant axis (X vs Y) and sign → map to intent.
-- Diagonal swipes: resolved by `FMath::Abs(Delta.X) > FMath::Abs(Delta.Y)` — dominant axis wins.
+- If `Delta.Size() > SwipeMinDistance` and `Duration < SwipeMaxDuration`: classify dominant axis (X vs Y) and sign , map to intent.
+- Diagonal swipes: resolved by `FMath::Abs(Delta.X) > FMath::Abs(Delta.Y)` , dominant axis wins.
 
 **Input Buffering:**
 - All gesture intents buffered for `InputBufferWindow` (default: 5 frames).
-- Buffer consumed on first valid execution frame — essential for jump inputs slightly before landing and lane switches during lane-switch completion.
+- Buffer consumed on first valid execution frame , essential for jump inputs slightly before landing and lane switches during lane-switch completion.
 
 ```cpp
 ETouchIntent UTouchInputSystem::ClassifySwipe(const FVector2D& StartPos, const FVector2D& EndPos, float Duration)
@@ -164,7 +165,7 @@ ETouchIntent UTouchInputSystem::ClassifySwipe(const FVector2D& StartPos, const F
 The world is generated at runtime as a continuous stream of chunks ahead of the player. `UProceduralGenSystem` manages the chunk lifecycle: spawn, active window, and despawn/pool.
 
 **Chunk Architecture:**
-- `AChunkBase` is the base class for all track segments — a fixed-length actor containing: ground mesh(es), obstacle spawn points, collectible spawn points, and decoration placement points.
+- `AChunkBase` is the base class for all track segments , a fixed-length actor containing: ground mesh(es), obstacle spawn points, collectible spawn points, and decoration placement points.
 - Chunk length is standardized (`ChunkLength` constant) to simplify the spawn lookahead calculation.
 - Chunks are authored as prefab-like actors with tagged spawn sockets; obstacle and collectible placement resolved at runtime, not baked.
 
@@ -173,9 +174,9 @@ The world is generated at runtime as a continuous stream of chunks ahead of the 
 [Active Chunk Window]
   Chunk N-1 (behind player, queued for pool return)
   Chunk N   (current player position)
-  Chunk N+1 (ahead — populated)
-  Chunk N+2 (lookahead — being populated)
-  Chunk N+3 (just spawned — empty, populating)
+  Chunk N+1 (ahead , populated)
+  Chunk N+2 (lookahead , being populated)
+  Chunk N+3 (just spawned , empty, populating)
 ```
 - `SpawnLookahead` (default: 3 chunks): number of chunks pre-generated ahead of player.
 - Each frame, `UProceduralGenSystem` evaluates player progress within `CurrentChunk`; when player crosses `ChunkTriggerThreshold` within the chunk, a new chunk is spawned and populated at the front.
@@ -185,7 +186,7 @@ The world is generated at runtime as a continuous stream of chunks ahead of the 
 - `UChunkPool` maintains a `TArray<AChunkBase*>` free list per chunk type.
 - On pool request: if free list non-empty, dequeue, reset transform, re-enable; else spawn new instance.
 - On pool return: disable actor, clear all spawned obstacles/collectibles, enqueue to free list.
-- Pool eliminates per-chunk `SpawnActor` / `DestroyActor` calls during gameplay — critical for mobile GC pressure.
+- Pool eliminates per-chunk `SpawnActor` / `DestroyActor` calls during gameplay , critical for mobile GC pressure.
 
 ```cpp
 AChunkBase* UChunkPool::AcquireChunk(TSubclassOf<AChunkBase> ChunkClass)
@@ -213,9 +214,9 @@ void UChunkPool::ReturnChunk(AChunkBase* Chunk)
 ```
 
 **Obstacle Placement:**
-- Each chunk type has an `UObstaclePlacementDataAsset`: a list of `FObstacleSpawnConfig` entries per spawn socket tag — each config specifies obstacle class, placement probability, and difficulty tier range.
+- Each chunk type has an `UObstaclePlacementDataAsset`: a list of `FObstacleSpawnConfig` entries per spawn socket tag , each config specifies obstacle class, placement probability, and difficulty tier range.
 - On chunk acquisition, `UProceduralGenSystem::PopulateChunk` iterates spawn sockets and rolls against probability weighted by current `DifficultyTier`.
-- Lane exclusivity: obstacle placement validates that no impassable combination is generated — at least one lane must always be clear per obstacle group (enforced via `FLaneMask` bitmask evaluation).
+- Lane exclusivity: obstacle placement validates that no impassable combination is generated , at least one lane must always be clear per obstacle group (enforced via `FLaneMask` bitmask evaluation).
 
 **Biome System:**
 - Chunk type selection weighted by current biome. `FBiomeConfig` data asset defines: chunk class weights, obstacle set, decoration mesh set, material parameter overrides, and ambient Niagara system.
@@ -239,12 +240,12 @@ Obstacles are `AObstacleBase` subclasses placed by the procedural system. Each h
 
 **Collision Resolution:**
 - `AObstacleBase` uses a `UBoxComponent` with `ECC_GameTraceChannel_Obstacle`.
-- On player overlap: `URCRGameMode::OnPlayerHitObstacle` called → triggers stumble animation, brief speed reduction, and if no shield power-up active, triggers run-end sequence.
+- On player overlap: `URCRGameMode::OnPlayerHitObstacle` called , triggers stumble animation, brief speed reduction, and if no shield power-up active, triggers run-end sequence.
 - Near-miss detection: separate larger trigger volume around each obstacle; near-miss within threshold awards score bonus.
 
 **Dynamic Obstacles:**
 - Moving obstacles use a `UInterpToMovementComponent` with configurable waypoints and speed.
-- Speed of moving obstacles scales with `DifficultyTier` — same config, faster movement at higher difficulty.
+- Speed of moving obstacles scales with `DifficultyTier` , same config, faster movement at higher difficulty.
 
 ---
 
@@ -273,8 +274,8 @@ Obstacles are `AObstacleBase` subclasses placed by the procedural system. Each h
 
 **Collectibles:**
 - `ACoinActor` and `APowerUpActor` placed on chunk populate pass.
-- Coins arranged in lane-following arc patterns defined in `FCoinPatternConfig` data assets — straight runs, arcs, zigzag between lanes.
-- Pattern selection weighted by difficulty tier — higher tiers introduce reward patterns that require skillful lane changes to collect fully.
+- Coins arranged in lane-following arc patterns defined in `FCoinPatternConfig` data assets , straight runs, arcs, zigzag between lanes.
+- Pattern selection weighted by difficulty tier , higher tiers introduce reward patterns that require skillful lane changes to collect fully.
 
 **Magnet Power-Up:**
 - On activation: all `ACoinActor` instances within `MagnetRadius` receive a `MoveToPlayer` task via `UInterpToMovementComponent` override.
@@ -290,7 +291,7 @@ Obstacles are `AObstacleBase` subclasses placed by the procedural system. Each h
 | Speed Boost | Temporary speed surge + invulnerability | Timed |
 | Double Jump | Enables second mid-air jump | Timed |
 
-- `UPowerUpSystem` manages active effects as `TArray<FActivePowerUp>` — each with `EPowerUpType`, `RemainingDuration`, and applied effect reference.
+- `UPowerUpSystem` manages active effects as `TArray<FActivePowerUp>` , each with `EPowerUpType`, `RemainingDuration`, and applied effect reference.
 - Power-ups processed per tick: duration decremented, expired effects deactivated and removed.
 - Stacking: same power-up type refreshes duration rather than stacking multiplicatively.
 
@@ -300,8 +301,8 @@ Obstacles are `AObstacleBase` subclasses placed by the procedural system. Each h
 
 **Chase Camera:**
 - `ARCRCameraActor` maintains a fixed offset behind and above the character.
-- Position updated via `FMath::VInterpTo` each tick — lag tuned for runner pacing (tight enough to feel responsive, loose enough to avoid jitter).
-- Forward offset slightly ahead of character gives player visibility of upcoming obstacles — lookahead distance scales with `CurrentSpeed`.
+- Position updated via `FMath::VInterpTo` each tick , lag tuned for runner pacing (tight enough to feel responsive, loose enough to avoid jitter).
+- Forward offset slightly ahead of character gives player visibility of upcoming obstacles , lookahead distance scales with `CurrentSpeed`.
 
 **Speed-Reactive FOV:**
 - Camera FOV widens as `CurrentSpeed` increases: `CurrentFOV = FMath::FInterpTo(CurrentFOV, BaseFOV + (SpeedFOVScale * NormalizedSpeed), DeltaTime, FOVInterpSpeed)`.
@@ -309,7 +310,7 @@ Obstacles are `AObstacleBase` subclasses placed by the procedural system. Each h
 
 **Death Camera:**
 - On run end: camera briefly holds position, then slowly pulls back and rises for a "survey the scene" beat before game over UI appears.
-- Implemented as a `UCameraSequence` Sequencer track — triggered from `URCRGameMode::OnRunEnd`.
+- Implemented as a `UCameraSequence` Sequencer track , triggered from `URCRGameMode::OnRunEnd`.
 
 ---
 
@@ -318,21 +319,21 @@ Obstacles are `AObstacleBase` subclasses placed by the procedural system. Each h
 Target: **60 fps sustained on mid-range Android hardware** (Snapdragon 6-series, Mali-G57 equivalent) over a 30-minute session without thermal throttling.
 
 **Rendering Budget:**
-- Mobile forward renderer — no deferred shading pipeline.
-- Draw call target: < 120 per frame (runner camera sees a narrow frustum — frustum culling is aggressive).
-- Static chunk geometry merged via `UHierarchicalInstancedStaticMeshComponent` for repeating tile meshes — one draw call per mesh type regardless of instance count.
+- Mobile forward renderer , no deferred shading pipeline.
+- Draw call target: < 120 per frame (runner camera sees a narrow frustum , frustum culling is aggressive).
+- Static chunk geometry merged via `UHierarchicalInstancedStaticMeshComponent` for repeating tile meshes , one draw call per mesh type regardless of instance count.
 - Texture budget: character max 1024×1024 ASTC; environment tiles 512×512 ASTC.
 - Dynamic shadows: cast only from character; environment uses baked lightmaps on static chunk components.
 - Particle cap: Niagara `MaxParticleCount` set per-system; off-screen emitters culled via scalability settings.
 
 **Object Pooling Impact:**
 - Chunk pool eliminates `SpawnActor` / `DestroyActor` GC pressure during gameplay.
-- Obstacle and coin actors similarly pooled — `UObstaclePool` and `UCoinPool` follow identical pattern to `UChunkPool`.
-- Pool pre-warmed at session start during loading screen — no pool misses during active gameplay.
+- Obstacle and coin actors similarly pooled , `UObstaclePool` and `UCoinPool` follow identical pattern to `UChunkPool`.
+- Pool pre-warmed at session start during loading screen , no pool misses during active gameplay.
 
 **Tick Optimization:**
 - Chunk despawn evaluation: checked at fixed 0.1s interval via `FTimerHandle`, not per-frame.
-- Score update: broadcast via `OnScoreChanged` delegate — UI updates event-driven, not polled.
+- Score update: broadcast via `OnScoreChanged` delegate , UI updates event-driven, not polled.
 - Difficulty evaluation: checked on `OnChunkEntered` event, not continuous tick.
 - Only `ULaneMovementSystem`, `UTouchInputSystem`, and camera tick at full frame rate.
 
@@ -343,13 +344,13 @@ Target: **60 fps sustained on mid-range Android hardware** (Snapdragon 6-series,
 - Prevents thermal throttle spiral on extended sessions.
 
 **Memory:**
-- Chunk assets use `TSoftObjectPtr` — async loaded per biome on first transition, not all at boot.
-- `FStreamableManager` handles async load; gameplay not gated on load completion — fallback chunk type used if target asset not yet loaded.
+- Chunk assets use `TSoftObjectPtr` , async loaded per biome on first transition, not all at boot.
+- `FStreamableManager` handles async load; gameplay not gated on load completion , fallback chunk type used if target asset not yet loaded.
 - Per-biome asset group unloaded on biome exit if not in the lookahead window.
 
 **Android-Specific:**
 - Portrait orientation locked.
-- `r.MobileHDR=0` — standard forward renderer.
+- `r.MobileHDR=0` , standard forward renderer.
 - `r.Shadow.CSM.MaxCascades=1` on mobile device profile.
 - ASTC texture compression for Adreno/Mali; ETC2 fallback via App Bundle split.
 - Haptic feedback on coin collection and obstacle hit via `FAndroidApplication::Vibrate`.
@@ -388,7 +389,7 @@ Target: **60 fps sustained on mid-range Android hardware** (Snapdragon 6-series,
 |---|---|
 | Developer count | 1 (solo) |
 | Engine | Unreal Engine 5.7 |
-| Languages | C++ |
+| Languages | Blueprint |
 | Platform | Android (Google Play) |
 | Generation | Chunk-based procedural streaming with object pooling |
 | Obstacle types | 5 categories with variants |
@@ -403,19 +404,19 @@ Target: **60 fps sustained on mid-range Android hardware** (Snapdragon 6-series,
 
 | Project | Description |
 |---|---|
-| [Royal Jump](https://play.google.com/store/apps/details?id=com.Kubrick.RoyalJump) | Mobile precision platformer; touch controls, physics movement — UE5.7 |
-| [TIME SOUL](https://store.steampowered.com/app/2928270/TIME_SOUL) | Souls-like action platformer; parkour, time-as-resource — UE5.1 |
-| [U.N. Owen Was Her](https://store.steampowered.com/app/3420540/UN_Owen_Was_Her) | Third-person horror; AI, bullet-hell boss — UE5.3 |
-| [Olympus of the Heavens](https://store.steampowered.com/app/3358020/Olympus_of_the_Heavens) | Isometric co-op ARPG; 12 bosses, Steam co-op — UE5.3 |
-| [Blood Garden](https://kubrik.itch.io/bloodgarden) | Souls-like melee combat; stamina, parry, elemental — UE5.4 |
-| [ArtStation Portfolio](https://www.artstation.com/kubrik) | 3D modeling — characters, creatures, props, environments |
+| [Royal Jump](https://play.google.com/store/apps/details?id=com.Kubrick.RoyalJump) | Mobile precision platformer; touch controls, physics movement , UE5.7 |
+| [TIME SOUL](https://store.steampowered.com/app/2928270/TIME_SOUL) | Souls-like action platformer; parkour, time-as-resource , UE5.1 |
+| [U.N. Owen Was Her](https://store.steampowered.com/app/3420540/UN_Owen_Was_Her) | Third-person horror; AI, bullet-hell boss , UE5.3 |
+| [Olympus of the Heavens](https://store.steampowered.com/app/3358020/Olympus_of_the_Heavens) | Isometric co-op ARPG; 12 bosses, Steam co-op , UE5.3 |
+| [Blood Garden](https://kubrik.itch.io/bloodgarden) | Souls-like melee combat; stamina, parry, elemental , UE5.4 |
+| [ArtStation Portfolio](https://www.artstation.com/kubrik) | 3D modeling , characters, creatures, props, environments |
 
 ---
 
 ## Developer
 
-**Kubrik** — Developer & 3D Artist  
-9 years web development · 7 years 3D modeling · 5 years Unreal Engine C++  
+**Kubrik** , Developer & 3D Artist  
+9 years web development · 7 years 3D modeling · 5 years Unreal Engine Blueprint  
 5 shipped commercial games as sole developer.
 
 [ArtStation](https://www.artstation.com/kubrik) · [Google Play](https://play.google.com/store/apps/details?id=com.Kubrick.RoyalJump) · [Steam](https://store.steampowered.com/search/?developer=Kubrik)
