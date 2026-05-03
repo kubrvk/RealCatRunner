@@ -31,102 +31,54 @@ The primary technical challenges were building a procedural chunk-based world th
 
 ---
 
-## Core Overview
 
-```
-RealCatRunner/
-├── Source/
-│   ├── Core/
-│   │   ├── RCRCharacter.h/.cpp                # Player cat character, lane movement
-│   │   ├── RCRGameMode.h/.cpp                 # Session, speed scaling, score, game state
-│   │   └── RCRPlayerController.h/.cpp         # Touch input routing, HUD init
-│   ├── Systems/
-│   │   ├── TouchInputSystem/                   # Raw touch , lane/jump/slide intent
-│   │   ├── LaneMovementSystem/                 # Auto-run, lane switching, speed ramp
-│   │   ├── ProceduralGenSystem/               # Chunk spawner, obstacle placement, pooling
-│   │   ├── ObstacleSystem/                     # Obstacle types, collision, difficulty scaling
-│   │   ├── CollectibleSystem/                  # Coin/power-up placement, magnetism, effects
-│   │   ├── PowerUpSystem/                      # Active power-up logic, duration, stacking
-│   │   ├── ScoreSystem/                        # Distance score, coin score, multiplier
-│   │   ├── DifficultySystem/                   # Speed curve, obstacle density ramp
-│   │   ├── CameraSystem/                       # Chase camera, speed-reactive FOV
-│   │   └── PerformanceSystem/                  # Adaptive quality, thermal management
-│   ├── Chunks/
-│   │   ├── ChunkBase/                          # Base chunk actor, spawn interface
-│   │   └── ChunkData/                          # Biome data assets, obstacle configs
-│   └── UI/
-│       ├── HUD/                                # Score, coins, distance, power-up timer
-│       ├── TouchOverlay/                        # Swipe zone feedback
-│       └── Menus/                              # Main menu, game over, shop, settings
-```
+## 1. Auto-Run & Lane Movement System
+<img src="https://play-lh.googleusercontent.com/B27x_iAvinUCyKGBYyf5LtYsGcOQljUr6QMmDSTr0dUqz8uA-85uiog5_a0ewqCNjNQLvxXK435CdQmiYbzvJZc=w5120-h2880-rw" width="100%"/>
 
----
+> Blueprint-based implementation in Unreal Engine
 
-## Core Systems: 
+The player character moves forward automatically at a speed controlled entirely by `BP_GameMode`. Lateral movement is constrained to discrete lanes — the player's only control axes are lane-switch (left/right), jump, and slide.
 
-### 1. Auto-Run & Lane Movement System
+### Forward Movement
 
-The player character moves forward automatically at a speed controlled entirely by `URCRGameMode`. Lateral movement is constrained to discrete lanes , the player's only control axes are lane-switch (left/right), jump, and slide.
+- `BP_LaneMovementSystem` drives the character forward each tick via direct position offset — not physics-based movement.
+- `CurrentSpeed` is a replicated float variable on `BP_GameMode`, incremented over session time via a difficulty curve.
+- Forward delta is computed inside the **Event Tick** node:
+  ```
+  NewLocation = CurrentLocation + (ForwardVector × CurrentSpeed × DeltaTime)
+  ```
+- Speed is applied directly to the character's world position using **Set Actor Location**, bypassing the **Character Movement Component's** `Max Walk Speed`. This avoids CMC pathfinding overhead and gives precise control over the forward axis without physics interference.
 
-**Forward Movement:**
-- `ULaneMovementSystem` drives the character forward each tick via direct position offset , not physics-based forward movement.
-- `CurrentSpeed` is a replicated float on `ARCRGameMode`, incremented by the difficulty curve over session time.
-- Forward delta: `NewLocation = CurrentLocation + (ForwardVector * CurrentSpeed * DeltaTime)`.
-- Speed is applied to the character position, not via `UCharacterMovementComponent::MaxWalkSpeed` , this avoids CMC pathfinding overhead and gives precise control over the forward axis without physics interference.
+### Lane System
 
-**Lane System:**
-- Track divided into `LaneCount` (default: 3) discrete lanes, each defined by a `float LaneOffset` from center.
-- `CurrentLane` (`int32`, range 0 to LaneCount-1) tracks active lane.
-- Lane switch: target lane offset computed; character X position lerped from current to target over `LaneSwitchDuration` via `FMath::FInterpTo`.
-- Lane switch blocked during: mid-air, slide, obstacle collision recovery.
+- The track is divided into `LaneCount` (default: `3`) discrete lanes, each defined by a `LaneOffset` float from center.
+- `CurrentLane` (integer, range `0` to `LaneCount - 1`) is stored as a variable on the player Blueprint and tracks the active lane.
+- On lane switch: the target lane offset is computed and the character's X position is interpolated from current to target over `LaneSwitchDuration` using the **FInterp To** node.
+- Lane switches are blocked during: mid-air state, slide state, and obstacle collision recovery (managed via a boolean flag `bCanSwitchLane`).
 
-```cpp
-void ULaneMovementSystem::SwitchLane(int32 Direction)
-{
-    int32 TargetLane = FMath::Clamp(CurrentLane + Direction, 0, LaneCount - 1);
-    if (TargetLane == CurrentLane || bLaneSwitchLocked) return;
+### Jump
 
-    CurrentLane = TargetLane;
-    TargetLaneOffset = LaneOffsets[CurrentLane];
-    bLaneSwitching = true;
-}
+- A vertical impulse is applied via **Launch Character** node; gravity returns the character to the track.
+- Jump height is configurable via a `JumpImpulseStrength` float variable.
+- Double-jump is available as a power-up state tracked by `bDoubleJumpEnabled`.
+- Landing detection is handled via the **On Landed** event; a brief landing animation blend is triggered on return.
 
-void ULaneMovementSystem::TickLaneSwitch(float DeltaTime)
-{
-    if (!bLaneSwitching) return;
+### Slide
 
-    FVector Location = CharacterOwner->GetActorLocation();
-    Location.Y = FMath::FInterpTo(Location.Y, TargetLaneOffset, DeltaTime, LaneSwitchSpeed);
-    CharacterOwner->SetActorLocation(Location);
-
-    if (FMath::Abs(Location.Y - TargetLaneOffset) < LaneSnapThreshold)
-    {
-        Location.Y = TargetLaneOffset;
-        CharacterOwner->SetActorLocation(Location);
-        bLaneSwitching = false;
-    }
-}
-```
-
-**Jump:**
-- Simple vertical impulse via `UCharacterMovementComponent::AddImpulse`; gravity returns character to track.
-- Jump height configurable; double-jump available as a power-up state.
-- Landing detection via `OnLanded` callback; brief landing animation blend on return.
-
-**Slide:**
-- Capsule half-height reduced on slide start; restored on slide end.
-- Slide duration fixed; early exit available if swipe-up received before duration expires.
-- Slide plays dedicated animation blend , low-body pose with maintained forward motion.
+- On slide start: capsule half-height is reduced via **Set Capsule Half Height**.
+- On slide end: capsule half-height is restored to its default value.
+- Slide duration is fixed via `SlideDuration` float; early exit is available if a swipe-up gesture is received before the duration expires.
+- A dedicated animation blend is played — low-body pose with maintained forward motion — driven by a **Blend Pose by Bool** node in the Animation Blueprint.
 
 ---
 
-### 2. Touch Input System
+## 2. Touch Input System
 
-Single-finger swipe and tap gestures map to all player actions. The system is implemented as a custom `UTouchInputComponent` that intercepts raw touch events before UE's default input processing.
+Single-finger swipe and tap gestures map to all player actions. Gesture recognition is implemented inside `BP_TouchInputComponent` (an Actor Component Blueprint) that processes raw touch events from **Event Begin/End Touch** before passing intents downstream.
 
-**Gesture Recognition:**
+### Gesture Map
 
-| Gesture | Action | Detection |
+| Gesture | Action | Detection Condition |
 |---|---|---|
 | Swipe Left | Lane switch left | Horizontal delta > threshold, leftward |
 | Swipe Right | Lane switch right | Horizontal delta > threshold, rightward |
@@ -134,101 +86,79 @@ Single-finger swipe and tap gestures map to all player actions. The system is im
 | Swipe Down | Slide | Vertical delta > threshold, downward |
 | Tap | Jump (alt) | Duration < `TapMaxDuration`, displacement < `TapMaxDrift` |
 
-**Swipe Detection Pipeline:**
-- `TouchBegin`: record `StartPosition`, `StartTime`.
-- `TouchEnd`: compute `Delta = EndPosition - StartPosition`, `Duration = EndTime - StartTime`.
-- If `Delta.Size() > SwipeMinDistance` and `Duration < SwipeMaxDuration`: classify dominant axis (X vs Y) and sign , map to intent.
-- Diagonal swipes: resolved by `FMath::Abs(Delta.X) > FMath::Abs(Delta.Y)` , dominant axis wins.
+### Swipe Detection Pipeline
 
-**Input Buffering:**
-- All gesture intents buffered for `InputBufferWindow` (default: 5 frames).
-- Buffer consumed on first valid execution frame , essential for jump inputs slightly before landing and lane switches during lane-switch completion.
+1. **Event Begin Touch** → store `StartPosition` and `StartTime` as local variables.
+2. **Event End Touch** → compute:
+   - `Delta = EndPosition − StartPosition`
+   - `Duration = EndTime − StartTime`
+3. If `Vector Length (Delta) > SwipeMinDistance` AND `Duration < SwipeMaxDuration`:
+   - Classify dominant axis: compare `Abs(Delta.X)` vs `Abs(Delta.Y)` via **Select** node — dominant axis wins.
+   - Map axis + sign to gesture intent and fire the corresponding dispatcher.
 
-```cpp
-ETouchIntent UTouchInputSystem::ClassifySwipe(const FVector2D& StartPos, const FVector2D& EndPos, float Duration)
-{
-    FVector2D Delta = EndPos - StartPos;
-    if (Delta.Size() < SwipeMinDistance || Duration > SwipeMaxDuration)
-        return ETouchIntent::None;
+### Input Buffering
 
-    if (FMath::Abs(Delta.X) > FMath::Abs(Delta.Y))
-        return Delta.X > 0 ? ETouchIntent::LaneRight : ETouchIntent::LaneLeft;
-    else
-        return Delta.Y < 0 ? ETouchIntent::Jump : ETouchIntent::Slide;
-}
-```
+- All gesture intents are buffered for `InputBufferWindow` (default: `5` frames) using a **Circular Buffer** array variable.
+- Buffer is consumed on the first valid execution frame — essential for jump inputs slightly before landing and lane switches initiated during an in-progress lane transition.
 
 ---
 
-### 3. Procedural Generation System
+## 3. Procedural Generation System
 
-The world is generated at runtime as a continuous stream of chunks ahead of the player. `UProceduralGenSystem` manages the chunk lifecycle: spawn, active window, and despawn/pool.
+The world is generated at runtime as a continuous stream of chunks ahead of the player. `BP_ProceduralGenSystem` (a Game Instance Subsystem Blueprint equivalent, implemented as a persistent Actor) manages the chunk lifecycle: spawn, active window, and despawn/pool.
 
-**Chunk Architecture:**
-- `AChunkBase` is the base class for all track segments , a fixed-length actor containing: ground mesh(es), obstacle spawn points, collectible spawn points, and decoration placement points.
-- Chunk length is standardized (`ChunkLength` constant) to simplify the spawn lookahead calculation.
-- Chunks are authored as prefab-like actors with tagged spawn sockets; obstacle and collectible placement resolved at runtime, not baked.
+### Chunk Architecture
 
-**Streaming Pipeline:**
+- `BP_ChunkBase` is the parent Blueprint class for all track segments — a fixed-length actor containing:
+  - Ground Static Mesh components
+  - Obstacle spawn point Scene Components (tagged by name)
+  - Collectible spawn point Scene Components
+  - Decoration placement Scene Components
+- Chunk length is standardized via a `ChunkLength` constant to simplify lookahead calculation.
+- Chunks are set up as parent Blueprints with tagged Child Actor sockets; obstacle and collectible placement is resolved at runtime via `PopulateChunk` — not baked into the chunk.
+
+### Streaming Pipeline
+
 ```
 [Active Chunk Window]
-  Chunk N-1 (behind player, queued for pool return)
-  Chunk N   (current player position)
-  Chunk N+1 (ahead , populated)
-  Chunk N+2 (lookahead , being populated)
-  Chunk N+3 (just spawned , empty, populating)
+  Chunk N-1  →  behind player, queued for pool return
+  Chunk N    →  current player position
+  Chunk N+1  →  ahead — fully populated
+  Chunk N+2  →  lookahead — being populated
+  Chunk N+3  →  just spawned — empty, populating
 ```
-- `SpawnLookahead` (default: 3 chunks): number of chunks pre-generated ahead of player.
-- Each frame, `UProceduralGenSystem` evaluates player progress within `CurrentChunk`; when player crosses `ChunkTriggerThreshold` within the chunk, a new chunk is spawned and populated at the front.
+
+- `SpawnLookahead` (default: `3` chunks) defines how many chunks are pre-generated ahead of the player.
+- Each tick, `BP_ProceduralGenSystem` evaluates player progress within `CurrentChunk`. When the player crosses `ChunkTriggerThreshold` inside the chunk (checked via a **Float >=** comparison), a new chunk is spawned and populated at the front.
 - Chunks behind the player beyond `DespawnDistance` are returned to the object pool.
 
-**Object Pool:**
-- `UChunkPool` maintains a `TArray<AChunkBase*>` free list per chunk type.
-- On pool request: if free list non-empty, dequeue, reset transform, re-enable; else spawn new instance.
-- On pool return: disable actor, clear all spawned obstacles/collectibles, enqueue to free list.
-- Pool eliminates per-chunk `SpawnActor` / `DestroyActor` calls during gameplay , critical for mobile GC pressure.
+### Object Pool
 
-```cpp
-AChunkBase* UChunkPool::AcquireChunk(TSubclassOf<AChunkBase> ChunkClass)
-{
-    TArray<AChunkBase*>& Pool = ChunkPools.FindOrAdd(ChunkClass);
+- `BP_ChunkPool` maintains a **TArray of BP_ChunkBase references** as a free list, organized per chunk type.
+- **On pool request:** if free list is non-empty, dequeue the first element, reset its transform via **Set Actor Transform**, and re-enable it via **Set Actor Hidden in Game (false)** + **Set Actor Enable Collision (true)**.
+- **On pool return:** hide the actor, clear all spawned obstacles/collectibles via a loop + **Destroy Actor**, and enqueue it back to the free list.
+- The pool eliminates **Spawn Actor from Class** / **Destroy Actor** calls during active gameplay — critical for reducing GC pressure on mobile.
 
-    if (Pool.Num() > 0)
-    {
-        AChunkBase* Chunk = Pool.Pop();
-        Chunk->SetActorHiddenInGame(false);
-        Chunk->SetActorEnableCollision(true);
-        return Chunk;
-    }
+### Obstacle Placement
 
-    return GetWorld()->SpawnActor<AChunkBase>(ChunkClass);
-}
+- Each chunk type references an `DA_ObstaclePlacement` Data Asset containing an array of `FObstacleSpawnConfig` structs per spawn socket tag. Each config specifies: obstacle Blueprint class, spawn probability, and difficulty tier range.
+- On chunk acquisition, `PopulateChunk` iterates each spawn socket and rolls against probability weighted by the current `DifficultyTier` using a **Random Float** node vs adjusted probability.
+- **Lane exclusivity:** obstacle placement validates via an `LaneMask` bitmask (integer bitwise operations) that no impassable combination is generated — at least one lane must always be clear per obstacle group.
 
-void UChunkPool::ReturnChunk(AChunkBase* Chunk)
-{
-    Chunk->ResetChunk(); // Clear obstacles, collectibles
-    Chunk->SetActorHiddenInGame(true);
-    Chunk->SetActorEnableCollision(false);
-    ChunkPools.FindOrAdd(Chunk->GetClass()).Add(Chunk);
-}
-```
+### Biome System
 
-**Obstacle Placement:**
-- Each chunk type has an `UObstaclePlacementDataAsset`: a list of `FObstacleSpawnConfig` entries per spawn socket tag , each config specifies obstacle class, placement probability, and difficulty tier range.
-- On chunk acquisition, `UProceduralGenSystem::PopulateChunk` iterates spawn sockets and rolls against probability weighted by current `DifficultyTier`.
-- Lane exclusivity: obstacle placement validates that no impassable combination is generated , at least one lane must always be clear per obstacle group (enforced via `FLaneMask` bitmask evaluation).
-
-**Biome System:**
-- Chunk type selection weighted by current biome. `FBiomeConfig` data asset defines: chunk class weights, obstacle set, decoration mesh set, material parameter overrides, and ambient Niagara system.
-- Biome transitions occur at distance thresholds defined in `FBiomeSequenceConfig`; blend handled via per-chunk `UMaterialParameterCollection` lerp over `BiomeTransitionLength` chunks.
+- Chunk type selection is weighted by the current biome via a **Weighted Random** selection from `DA_BiomeConfig`.
+- `DA_BiomeConfig` Data Asset defines: chunk class weights, obstacle set, decoration mesh set, Material Parameter Collection overrides, and ambient Niagara system reference.
+- Biome transitions occur at distance thresholds defined in `DA_BiomeSequenceConfig`.
+- Blend is handled per-chunk via a **Set Scalar Parameter Value (MPC)** lerp node across `BiomeTransitionLength` chunks.
 
 ---
 
-### 4. Obstacle System
+## 4. Obstacle System
 
-Obstacles are `AObstacleBase` subclasses placed by the procedural system. Each has: a collision profile, a `FObstacleConfig` data asset reference, and an optional movement component for dynamic variants.
+Obstacles are child Blueprints of `BP_ObstacleBase` placed by the procedural system. Each has: a collision Box Component, a `DA_ObstacleConfig` Data Asset reference, and an optional movement component for dynamic variants.
 
-**Obstacle Categories:**
+### Obstacle Categories
 
 | Type | Lane Behavior | Player Response |
 |---|---|---|
@@ -238,50 +168,69 @@ Obstacles are `AObstacleBase` subclasses placed by the procedural system. Each h
 | Moving Block | Oscillates between lanes | Timed lane switch or jump |
 | Barrier Gate | 2 lanes blocked | Single open lane |
 
-**Collision Resolution:**
-- `AObstacleBase` uses a `UBoxComponent` with `ECC_GameTraceChannel_Obstacle`.
-- On player overlap: `URCRGameMode::OnPlayerHitObstacle` called , triggers stumble animation, brief speed reduction, and if no shield power-up active, triggers run-end sequence.
-- Near-miss detection: separate larger trigger volume around each obstacle; near-miss within threshold awards score bonus.
+### Collision Resolution
 
-**Dynamic Obstacles:**
-- Moving obstacles use a `UInterpToMovementComponent` with configurable waypoints and speed.
-- Speed of moving obstacles scales with `DifficultyTier` , same config, faster movement at higher difficulty.
+- `BP_ObstacleBase` uses a **Box Collision** component with a custom `Obstacle` collision profile.
+- On player overlap: **On Component Begin Overlap** fires → calls `OnPlayerHitObstacle` on `BP_GameMode` via **Get Game Mode** + **Cast**.
+- `OnPlayerHitObstacle` triggers: stumble animation montage, brief speed reduction, and (if no shield power-up active) the run-end sequence.
+- **Near-miss detection:** a separate, larger **Box Collision** trigger surrounds each obstacle. Entry + exit without a hit awards a score bonus via the **Score System**.
 
----
+### Dynamic Obstacles
 
-### 5. Difficulty & Speed System
-
-`UDifficultySystem` governs the game's progressive challenge increase over session distance.
-
-**Speed Curve:**
-- `CurrentSpeed` initialized at `BaseSpeed`; increases via `UCurveFloat SpeedCurve` sampled against `SessionDistance`.
-- Speed curve authored to ramp quickly early (hook player), then plateau with occasional burst events.
-- `MaxSpeed` cap prevents inputs from becoming physically impossible to respond to on touch.
-
-**Difficulty Tier:**
-- `DifficultyTier` (`int32`) increments at distance thresholds defined in `TArray<float> TierThresholds`.
-- Tier governs: obstacle density multiplier, obstacle type weights (harder types unlock at higher tiers), moving obstacle speed, collectible gap distances.
-- Obstacle placement probability: `AdjustedProbability = BaseProbability * DifficultyMultiplierCurve(DifficultyTier)`.
-
-**Score System:**
-- `ScoreSystem` tracks: `DistanceScore` (continuous, scales with speed), `CoinScore` (per-coin flat value), `ComboMultiplier` (increments on consecutive near-misses, resets on hit).
-- Final score: `(DistanceScore + CoinScore) * ComboMultiplier`.
-- High score persisted via `USaveGame` slot.
+- Moving obstacles use an **Interp To Movement Component** with configurable waypoints and speed defined in the Data Asset.
+- Movement speed of dynamic obstacles scales with `DifficultyTier` — same Blueprint, faster movement via a multiplied speed input at higher difficulties.
 
 ---
 
-### 6. Collectible & Power-Up System
+## 5. Difficulty & Speed System
 
-**Collectibles:**
-- `ACoinActor` and `APowerUpActor` placed on chunk populate pass.
-- Coins arranged in lane-following arc patterns defined in `FCoinPatternConfig` data assets , straight runs, arcs, zigzag between lanes.
-- Pattern selection weighted by difficulty tier , higher tiers introduce reward patterns that require skillful lane changes to collect fully.
+`BP_DifficultySystem` (an Actor Component on `BP_GameMode`) governs progressive challenge increase over session distance.
 
-**Magnet Power-Up:**
-- On activation: all `ACoinActor` instances within `MagnetRadius` receive a `MoveToPlayer` task via `UInterpToMovementComponent` override.
-- Radius checked each tick; newly spawned coins within radius are auto-collected.
+### Speed Curve
 
-**Active Power-Ups:**
+- `CurrentSpeed` is initialized at `BaseSpeed` and increases by sampling a **Curve Float asset** (`C_SpeedCurve`) against `SessionDistance` using the **Get Float Value** node each tick.
+- The speed curve ramps quickly early (to hook the player), then plateaus with occasional burst events.
+- `MaxSpeed` is clamped via a **Clamp (Float)** node — prevents inputs from becoming physically impossible to respond to on touch.
+
+### Difficulty Tier
+
+- `DifficultyTier` (integer) increments when `SessionDistance` crosses thresholds defined in a `TierThresholds` float array, evaluated on the **On Chunk Entered** custom event.
+- Tier governs: obstacle density multiplier, obstacle type weights (harder types unlock at higher tiers), moving obstacle speed, and collectible gap distances.
+- Adjusted probability:
+  ```
+  AdjustedProbability = BaseProbability × DifficultyMultiplierCurve(DifficultyTier)
+  ```
+  Multiplier is sampled from a **Curve Float** asset via `DifficultyTier` as input.
+
+### Score System
+
+- `BP_ScoreSystem` (Actor Component) tracks:
+  - `DistanceScore` — continuous, scaled with speed each tick
+  - `CoinScore` — flat value added per coin collected
+  - `ComboMultiplier` — increments on consecutive near-misses, resets on obstacle hit
+- Final score formula:
+  ```
+  FinalScore = (DistanceScore + CoinScore) × ComboMultiplier
+  ```
+- High score persisted via a **Save Game Blueprint** (`BP_SaveGame`) and **Save Game to Slot** node.
+
+---
+
+## 6. Collectible & Power-Up System
+
+### Collectibles
+
+- `BP_Coin` and `BP_PowerUp` are placed during the chunk populate pass.
+- Coins are arranged in lane-following arc patterns defined in `DA_CoinPattern` Data Assets — straight runs, arcs, zigzag between lanes.
+- Pattern selection is weighted by `DifficultyTier` — higher tiers introduce reward patterns that require skillful lane changes to collect fully.
+
+### Magnet Power-Up
+
+- On activation: all `BP_Coin` actors within `MagnetRadius` are found via **Get All Actors of Class** + **Distance** check.
+- Each coin within radius receives a move-to-player command driven by an **Interp To Movement Component** override.
+- Each tick, newly spawned coins within radius are auto-collected via the same radius check.
+
+### Active Power-Ups
 
 | Power-Up | Effect | Duration |
 |---|---|---|
@@ -291,71 +240,84 @@ Obstacles are `AObstacleBase` subclasses placed by the procedural system. Each h
 | Speed Boost | Temporary speed surge + invulnerability | Timed |
 | Double Jump | Enables second mid-air jump | Timed |
 
-- `UPowerUpSystem` manages active effects as `TArray<FActivePowerUp>` , each with `EPowerUpType`, `RemainingDuration`, and applied effect reference.
-- Power-ups processed per tick: duration decremented, expired effects deactivated and removed.
-- Stacking: same power-up type refreshes duration rather than stacking multiplicatively.
+- `BP_PowerUpSystem` (Actor Component) manages active effects as an array of `FActivePowerUp` structs — each storing `PowerUpType` (Enum), `RemainingDuration` (float), and an active effect flag.
+- Power-ups are processed each tick: duration is decremented via `DeltaTime`, expired effects are deactivated and removed from the array via **Remove Index**.
+- **Stacking rule:** activating the same power-up type refreshes its `RemainingDuration` rather than stacking multiplicatively — handled via an **Array Find** check before adding.
 
 ---
 
-### 7. Camera System
+## 7. Camera System
 
-**Chase Camera:**
-- `ARCRCameraActor` maintains a fixed offset behind and above the character.
-- Position updated via `FMath::VInterpTo` each tick , lag tuned for runner pacing (tight enough to feel responsive, loose enough to avoid jitter).
-- Forward offset slightly ahead of character gives player visibility of upcoming obstacles , lookahead distance scales with `CurrentSpeed`.
+### Chase Camera
 
-**Speed-Reactive FOV:**
-- Camera FOV widens as `CurrentSpeed` increases: `CurrentFOV = FMath::FInterpTo(CurrentFOV, BaseFOV + (SpeedFOVScale * NormalizedSpeed), DeltaTime, FOVInterpSpeed)`.
-- Communicates speed increase to player viscerally without UI.
+- `BP_RunnerCamera` (a Camera Actor Blueprint) maintains a fixed offset behind and above the character, stored as `CameraOffset` (Vector variable).
+- Position is updated via **VInterp To** each tick — lag is tuned for runner pacing (tight enough to feel responsive, loose enough to avoid jitter).
+- The forward offset is slightly ahead of the character to give the player visibility of upcoming obstacles; lookahead distance scales with `CurrentSpeed`.
 
-**Death Camera:**
-- On run end: camera briefly holds position, then slowly pulls back and rises for a "survey the scene" beat before game over UI appears.
-- Implemented as a `UCameraSequence` Sequencer track , triggered from `URCRGameMode::OnRunEnd`.
+### Speed-Reactive FOV
+
+- Camera FOV widens as `CurrentSpeed` increases, computed each tick:
+  ```
+  CurrentFOV = FInterp To(CurrentFOV, BaseFOV + (SpeedFOVScale × NormalizedSpeed), DeltaTime, FOVInterpSpeed)
+  ```
+  Applied via **Set Field of View** on the Camera Component.
+- Communicates speed increase viscerally without any UI element.
+
+### Death Camera
+
+- On run end: camera briefly holds position, then slowly pulls back and rises for a "survey the scene" beat before the game over UI appears.
+- Implemented as a **Level Sequence** triggered from the `OnRunEnd` custom event in `BP_GameMode` via **Play Level Sequence** node.
 
 ---
 
-### 8. Mobile Performance & Optimization
+## 8. Mobile Performance & Optimization
 
-Target: **60 fps sustained on mid-range Android hardware** (Snapdragon 6-series, Mali-G57 equivalent) over a 30-minute session without thermal throttling.
+**Target: 60 fps sustained on mid-range Android hardware** (Snapdragon 6-series, Mali-G57 equivalent) over a 30-minute session without thermal throttling.
 
-**Rendering Budget:**
-- Mobile forward renderer , no deferred shading pipeline.
-- Draw call target: < 120 per frame (runner camera sees a narrow frustum , frustum culling is aggressive).
-- Static chunk geometry merged via `UHierarchicalInstancedStaticMeshComponent` for repeating tile meshes , one draw call per mesh type regardless of instance count.
-- Texture budget: character max 1024×1024 ASTC; environment tiles 512×512 ASTC.
-- Dynamic shadows: cast only from character; environment uses baked lightmaps on static chunk components.
-- Particle cap: Niagara `MaxParticleCount` set per-system; off-screen emitters culled via scalability settings.
+### Rendering Budget
 
-**Object Pooling Impact:**
-- Chunk pool eliminates `SpawnActor` / `DestroyActor` GC pressure during gameplay.
-- Obstacle and coin actors similarly pooled , `UObstaclePool` and `UCoinPool` follow identical pattern to `UChunkPool`.
-- Pool pre-warmed at session start during loading screen , no pool misses during active gameplay.
+- Mobile Forward Renderer — no deferred shading pipeline (`r.MobileHDR=0`).
+- Draw call target: **< 120 per frame** (runner camera sees a narrow frustum — frustum culling is aggressive).
+- Repeating tile meshes use **Hierarchical Instanced Static Mesh Components (HISM)** — one draw call per mesh type regardless of instance count.
+- Texture budget: character max `1024×1024` ASTC; environment tiles `512×512` ASTC.
+- Dynamic shadows: cast only from the character; environment uses baked lightmaps on static chunk components.
+- Particle cap: Niagara `Max Particle Count` set per-system; off-screen emitters culled via scalability settings.
 
-**Tick Optimization:**
-- Chunk despawn evaluation: checked at fixed 0.1s interval via `FTimerHandle`, not per-frame.
-- Score update: broadcast via `OnScoreChanged` delegate , UI updates event-driven, not polled.
-- Difficulty evaluation: checked on `OnChunkEntered` event, not continuous tick.
-- Only `ULaneMovementSystem`, `UTouchInputSystem`, and camera tick at full frame rate.
+### Object Pooling Impact
 
-**Adaptive Quality:**
-- `UPerformanceSystem` monitors rolling frame time average.
-- On sustained frame budget overrun: reduces shadow distance, particle counts, post-process quality one tier.
+- Chunk pool eliminates **Spawn Actor** / **Destroy Actor** GC pressure during gameplay.
+- Obstacle and coin actors are similarly pooled — `BP_ObstaclePool` and `BP_CoinPool` follow the identical pattern used by `BP_ChunkPool`.
+- All pools are pre-warmed at session start during the loading screen — no pool misses occur during active gameplay.
+
+### Tick Optimization
+
+| System | Tick Strategy |
+|---|---|
+| Chunk despawn evaluation | **Set Timer by Function Name** at 0.1s interval — not per-frame |
+| Score UI update | **OnScoreChanged** Event Dispatcher — UI updates are event-driven, not polled |
+| Difficulty evaluation | Fired on **OnChunkEntered** custom event — not continuous tick |
+| Lane Movement, Touch Input, Camera | Full frame-rate tick via **Event Tick** |
+
+### Adaptive Quality
+
+- `BP_PerformanceSystem` monitors a rolling frame time average using a float array sampled each tick.
+- On sustained frame budget overrun: reduces shadow distance, particle counts, and post-process quality by one tier via **Execute Console Command** nodes.
 - On sustained recovery: restores one tier.
 - Prevents thermal throttle spiral on extended sessions.
 
-**Memory:**
-- Chunk assets use `TSoftObjectPtr` , async loaded per biome on first transition, not all at boot.
-- `FStreamableManager` handles async load; gameplay not gated on load completion , fallback chunk type used if target asset not yet loaded.
-- Per-biome asset group unloaded on biome exit if not in the lookahead window.
+### Memory Management
 
-**Android-Specific:**
-- Portrait orientation locked.
-- `r.MobileHDR=0` , standard forward renderer.
-- `r.Shadow.CSM.MaxCascades=1` on mobile device profile.
-- ASTC texture compression for Adreno/Mali; ETC2 fallback via App Bundle split.
-- Haptic feedback on coin collection and obstacle hit via `FAndroidApplication::Vibrate`.
+- Chunk assets use **Soft Object References** (`TSoftObjectPtr` equivalent) — async loaded per biome on first transition, not all at boot.
+- **Async Load Asset** node handles loading; gameplay is not gated on load completion — a fallback chunk type is used if the target asset is not yet loaded.
+- Per-biome asset groups are unloaded on biome exit if not in the lookahead window via **Unload Primary Asset**.
 
----
+### Android-Specific Settings
+
+- Portrait orientation locked in **Project Settings → Supported Orientations**.
+- `r.MobileHDR=0` — standard forward renderer.
+- `r.Shadow.CSM.MaxCascades=1` set in the mobile device profile.
+- ASTC texture compression for Adreno/Mali; ETC2 fallback via App Bundle split configured in **Android Build Settings**.
+- Haptic feedback on coin collection and obstacle hit via the **Play Haptic Effect** node.
 
 ## Build & Packaging
 
@@ -387,7 +349,7 @@ Target: **60 fps sustained on mid-range Android hardware** (Snapdragon 6-series,
 
 | Category | Detail |
 |---|---|
-| Developer count | 1 (solo) |
+| Developer count | 1 |
 | Engine | Unreal Engine 5.7 |
 | Languages | Blueprint |
 | Platform | Android (Google Play) |
@@ -396,7 +358,7 @@ Target: **60 fps sustained on mid-range Android hardware** (Snapdragon 6-series,
 | Power-ups | 5 types |
 | 3D Assets | All original |
 | Gameplay systems | 10 discrete systems (see above) |
-| Development tools | UE5 Editor, Android Studio, ZBrush, Maya, Substance Painter |
+| Development tools | UE5 Editor, Android Studio, Blender, Substance Painter |
 
 ---
 
@@ -416,9 +378,6 @@ Target: **60 fps sustained on mid-range Android hardware** (Snapdragon 6-series,
 ## Developer
 
 **Kubrik** , Developer & 3D Artist  
-9 years web development · 7 years 3D modeling · 5 years Unreal Engine Blueprint  
-5 shipped commercial games as sole developer.
-
 [ArtStation](https://www.artstation.com/kubrik) · [Google Play](https://play.google.com/store/apps/details?id=com.Kubrick.RoyalJump) · [Steam](https://store.steampowered.com/search/?developer=Kubrik)
 
 ---
